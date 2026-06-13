@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hrs-draft-invoice-hub
+    name: hrseinvoice
     runtime: node
     plan: free
     region: singapore
