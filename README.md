@@ -24,6 +24,8 @@ Open `http://localhost:9090`.
 
 The included `render.yaml` defines a Render Node.js web service. Create a Render Blueprint from this repository to deploy it.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/kynguyentani/hrs-draft-invoice-hub)
+
 ## Operational notes
 
 - Invoice data is stored in memory and is cleared whenever the server restarts.
