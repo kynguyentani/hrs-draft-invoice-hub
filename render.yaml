@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: hrs-draft-invoice-hub
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: commit
