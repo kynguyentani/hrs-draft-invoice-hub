@@ -13,7 +13,7 @@ Open `http://localhost:9090`.
 
 ## Live deployment
 
-https://hrs-draft-invoice-hub.onrender.com
+https://hrseinvoice.onrender.com
 
 ## Endpoints
 
