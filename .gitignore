@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.*
+*.log
+
+# Local reference and test material
+sample_payload.txt
+HRS-Master-Tool-*.html
+*API.txt
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.tools/
