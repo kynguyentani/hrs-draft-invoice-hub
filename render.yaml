@@ -8,3 +8,8 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     autoDeployTrigger: commit
+    envVars:
+      - key: HRS_ADMIN_USER
+        value: hrsadmin
+      - key: HRS_ADMIN_PASSWORD
+        sync: false
