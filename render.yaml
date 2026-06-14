@@ -12,5 +12,4 @@ services:
       - key: HRS_ADMIN_USER
         value: hrsadmin
       - key: HRS_ADMIN_PASSWORD
-        value: hrsadmin101
         sync: false
