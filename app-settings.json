@@ -1,0 +1,6 @@
+{
+  "controls": {
+    "allowDuplicateBill": false,
+    "allowZeroRevVatBill": true
+  }
+}
