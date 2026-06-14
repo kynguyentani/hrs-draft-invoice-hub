@@ -6,6 +6,7 @@ Node.js endpoint emulator and live dashboard for receiving, inspecting, grouping
 
 ```powershell
 npm ci
+$env:HRS_ADMIN_PASSWORD="<your-admin-password>"
 npm start
 ```
 
@@ -33,5 +34,6 @@ The included `render.yaml` defines a Render Node.js web service. Create a Render
 ## Operational notes
 
 - Invoice data is stored in memory and is cleared whenever the server restarts.
+- Set `HRS_ADMIN_PASSWORD` in the environment before using the admin login. Optional overrides: `HRS_ADMIN_USER`, `HRS_ADMIN_DISPLAY_NAME`.
 - The emulator endpoints have no production authentication or persistent storage.
 - Do not send sensitive or production guest data to a public deployment.
