@@ -87,6 +87,23 @@ function getBillNo(data) {
     );
 }
 
+function createInvoiceStoreKey(billNo) {
+    const baseKey = String(billNo);
+    if (!invoiceStore.has(baseKey)) return baseKey;
+
+    let copy = 2;
+    let nextKey = `${baseKey}__dup${copy}`;
+    while (invoiceStore.has(nextKey)) {
+        copy += 1;
+        nextKey = `${baseKey}__dup${copy}`;
+    }
+    return nextKey;
+}
+
+function getDisplayBillNo(key, record) {
+    return firstValue(record?.billNo, getBillNo(record?.data), key);
+}
+
 function getHotelCode(data) {
     return firstValue(
         data?.HotelInfo?.HotelCode,
@@ -225,22 +242,23 @@ app.post('/api/InvoiceHub/ImportInvoiceJsonData', (express.json()), (req, res) =
             || payload?.FolioInfo?.FolioHeaderInfo?.BillNo
             || `MOCK-${Date.now()}`;
         
-        // Cache the parsed JSON payload structure into runtime memory
-        const billKey = billNo.toString();
-        const isNew = !invoiceStore.has(billKey);
+        // Cache each inbound payload as its own transaction, even when BillNo repeats.
+        const displayBillNo = billNo.toString();
+        const billKey = createInvoiceStoreKey(displayBillNo);
         invoiceStore.set(billKey, {
+            billNo: displayBillNo,
             timestamp: new Date().toLocaleTimeString(),
             data: payload
         });
 
-        console.log(`[\x1b[32mSUCCESS\x1b[0m] Cached BillNo: \x1b[33m${billNo}\x1b[0m globally [Folio Records: ${getPostings(payload).length}]`);
-        notifyDashboardClients({ type: 'invoice-received', billNo: billKey, isNew });
+        console.log(`[\x1b[32mSUCCESS\x1b[0m] Cached BillNo: \x1b[33m${displayBillNo}\x1b[0m globally as \x1b[36m${billKey}\x1b[0m [Folio Records: ${getPostings(payload).length}]`);
+        notifyDashboardClients({ type: 'invoice-received', billNo: billKey, displayBillNo, isNew: true });
 
         res.json({
             StatusCode: 200,
             IsError: false,
             Message: `E-invoice is created.`,
-            Result: null,
+            Result: displayBillNo || "EINVOICE",
             ErrorCode: 0
         });
 
@@ -349,6 +367,7 @@ app.get('/', (req, res) => {
             const d = value.data;
             const sum = getSummaryInfo(d);
             const chequeCount = getChequeDetails(d).allChequeDetails.length;
+            const displayBillNo = getDisplayBillNo(key, value);
             let totalPayment = 0;
 
             for (const b of toArray(d.RevenueBucketInfo || d.FolioInfo?.RevenueBucketInfo)) {
@@ -358,9 +377,9 @@ app.get('/', (req, res) => {
             }
 
             rowsHtml += `
-                <tr class="invoice-row" data-bill="${escapeHtml(key)}">
+                <tr class="invoice-row" data-bill="${escapeHtml(key)}" data-bill-label="${escapeHtml(displayBillNo)}">
                     <td class="select-cell">
-                        <input type="checkbox" class="row-select" value="${escapeHtml(key)}" aria-label="Select bill ${escapeHtml(key)}" onchange="syncSelectionState()">
+                        <input type="checkbox" class="row-select" value="${escapeHtml(key)}" aria-label="Select bill ${escapeHtml(displayBillNo)}" onchange="syncSelectionState()">
                     </td>
                     <td class="time-cell">
                         <span class="row-signal" aria-hidden="true"></span>
@@ -370,12 +389,12 @@ app.get('/', (req, res) => {
                     <td class="room-cell">${escapeHtml(getRoomNo(d))}</td>
                     <td class="bill-cell">
                         <div class="bill-actions">
-                            <a class="bill-link" href="/invoice/${encodeURIComponent(key)}" target="_blank" rel="noopener" aria-label="Open draft invoice ${escapeHtml(key)}">
-                                <span>${escapeHtml(key)}</span>
+                            <a class="bill-link" href="/invoice/${encodeURIComponent(key)}" target="_blank" rel="noopener" aria-label="Open draft invoice ${escapeHtml(displayBillNo)}">
+                                <span>${escapeHtml(displayBillNo)}</span>
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"/><path d="m10 14 11-11"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                             </a>
                             ${chequeCount > 0 ? `
-                                <button type="button" class="cheque-count" onclick="openChequeDetails(event,'${encodeURIComponent(key)}')" aria-label="View ${chequeCount} associated POS cheques for bill ${escapeHtml(key)}" title="View ${chequeCount} associated POS cheque${chequeCount === 1 ? '' : 's'}">
+                                <button type="button" class="cheque-count" onclick="openChequeDetails(event,'${encodeURIComponent(key)}')" aria-label="View ${chequeCount} associated POS cheques for bill ${escapeHtml(displayBillNo)}" title="View ${chequeCount} associated POS cheque${chequeCount === 1 ? '' : 's'}">
                                     ${chequeCount}
                                 </button>` : ''}
                         </div>
@@ -394,7 +413,7 @@ app.get('/', (req, res) => {
                     <td class="number-cell secondary-value">${formatNum(sum.TotalRounding)}</td>
                     <td class="number-cell payment-value">${formatNum(totalPayment)}</td>
                     <td class="action-cell">
-                        <button type="button" class="delete-btn" data-bill="${escapeHtml(encodeURIComponent(key))}" onclick="requestDelete(event,this)" aria-label="Delete bill ${escapeHtml(key)}" title="Delete bill ${escapeHtml(key)}">
+                        <button type="button" class="delete-btn" data-bill="${escapeHtml(encodeURIComponent(key))}" onclick="requestDelete(event,this)" aria-label="Delete bill ${escapeHtml(displayBillNo)}" title="Delete bill ${escapeHtml(displayBillNo)}">
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 15H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>
                         </button>
                     </td>
@@ -939,6 +958,11 @@ app.get('/', (req, res) => {
             syncSelectionState();
         }
 
+        function getBillLabel(billNo) {
+            const row = document.querySelector('.invoice-row[data-bill="' + CSS.escape(billNo) + '"]');
+            return row && row.dataset.billLabel ? row.dataset.billLabel : billNo;
+        }
+
         function openDeleteDialog(billNos, focusTarget) {
             pendingDeleteBills = billNos.filter(Boolean);
             pendingDeleteFocus = focusTarget || null;
@@ -949,7 +973,7 @@ app.get('/', (req, res) => {
             document.getElementById('deleteMessagePrefix').textContent = isBulk ? 'The selected' : 'Bill';
             document.getElementById('deleteBillNumber').textContent = isBulk
                 ? pendingDeleteBills.length + ' invoices'
-                : pendingDeleteBills[0];
+                : getBillLabel(pendingDeleteBills[0]);
             document.getElementById('confirmDelete').textContent = isBulk ? 'Delete invoices' : 'Delete invoice';
             document.getElementById('deleteModal').classList.add('visible');
             document.body.style.overflow = 'hidden';
@@ -1179,6 +1203,7 @@ app.get('/invoice/:billNo/cheques', (req, res) => {
         </body>`);
     }
 
+    const displayBillNo = getDisplayBillNo(billNo, record);
     const allChequeDetails = getChequeDetails(record.data).allChequeDetails;
     const chequeBoxes = allChequeDetails.length
         ? allChequeDetails.map(item => {
@@ -1197,7 +1222,7 @@ app.get('/invoice/:billNo/cheques', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>All Cheque Details - Bill ${escapeHtml(billNo)}</title>
+    <title>All Cheque Details - Bill ${escapeHtml(displayBillNo)}</title>
     <style>
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
         body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
@@ -1228,7 +1253,7 @@ app.get('/invoice/:billNo/cheques', (req, res) => {
         <div class="logo-box"><div class="logo-inner"><span class="logo-text">NNK</span></div></div>
         <div><div class="topbar-title">HRS DRAFT INVOICE HUB</div><div class="topbar-sub">All Cheque Details</div></div>
         <div class="topbar-divider"></div>
-        <div class="bill-badge"><span class="dot"></span><span>Bill ${escapeHtml(billNo)}</span></div>
+        <div class="bill-badge"><span class="dot"></span><span>Bill ${escapeHtml(displayBillNo)}</span></div>
     </div>
     <main class="page">
         <div class="page-header">
@@ -1315,7 +1340,7 @@ app.get('/invoice/:billNo', (req, res) => {
   .topbar-badge .dot { width:7px; height:7px; border-radius:50%; background:#34d399; box-shadow:0 0 6px #10b981; }
   .topbar-badge .lbl { color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:.06em; font-size:9px; }
   .topbar-badge .val { color:#34d399; font-weight:700; }
-  .topbar-right { margin-left:auto; display:flex; align-items:center; gap:10px; }
+  .topbar-right { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
   .group-toggle,.print-btn { display:flex; align-items:center; gap:8px; background:#1e293b; border:1px solid #475569; border-radius:8px; padding:6px 14px; font-size:11px; font-weight:700; cursor:pointer; text-transform:uppercase; letter-spacing:.05em; color:#cbd5e1; transition:background .15s,border-color .15s,color .15s; user-select:none; }
   .group-toggle:hover,.print-btn:hover { background:#334155; color:#f8fafc; }
   .group-toggle.on { background:rgba(56,189,248,0.12); border-color:rgba(56,189,248,0.45); color:#38bdf8; }
@@ -1372,7 +1397,8 @@ app.get('/invoice/:billNo', (req, res) => {
   <div class="topbar-divider"></div>
   <div class="topbar-badge"><div class="dot"></div><span class="lbl">Draft Invoice</span><span class="val">${escapeHtml(currentBillNo)}</span></div>
   <div class="topbar-right">
-    <button class="group-toggle" id="groupToggleBtn" onclick="toggleGrouping()"><div class="toggle-pip"></div><span>Group by Package &amp; Tax Rate</span></button>
+    <button class="group-toggle" id="packageGroupToggleBtn" onclick="setGroupingMode('package')"><div class="toggle-pip"></div><span>Group by Package &amp; Tax Rate</span></button>
+    <button class="group-toggle" id="checkGroupToggleBtn" onclick="setGroupingMode('check')"><div class="toggle-pip"></div><span>Group by CheckNumber</span></button>
     <button class="print-btn" onclick="window.print()">Print</button>
   </div>
 </div>
@@ -1434,14 +1460,33 @@ app.get('/invoice/:billNo', (req, res) => {
   const INV_PKG_DESC = ${serialisedPkgDesc};
   const INV_CHEQUE_MAP = ${serialisedChequeMap};
   const INV_ALL_CHEQUES = ${serialisedAllCheques};
-  let groupingOn = false;
+  let groupByPackage = false;
+  let groupByCheckNumber = false;
 
   function f(v) { return (v == null || v === '') ? '--' : String(v); }
   function fn(v) { const n = parseFloat(v); if (isNaN(n)) return '--'; return n.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function upr(amt, qty) { const q = parseFloat(qty); if (!q) return null; return parseFloat(amt) / q; }
-  function hasPackageRef(p) { const v = p && p.TrxNoAgainstPackage; return v != null && String(v).trim() !== '' && String(v).trim() !== '0'; }
+  function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  function upr(amt, qty) { const q = num(qty); if (!q) return null; return num(amt) / q; }
+  function sumAmount(rows) { return rows.reduce((s, p) => s + num(p.HRSAmount), 0); }
+  function sameOrMixed(rows, fieldOrGetter) {
+    const getVal = typeof fieldOrGetter === 'function' ? fieldOrGetter : (p) => p[fieldOrGetter];
+    const vals = [...new Set(rows.map(getVal).filter((v) => v != null && v !== '').map(String))];
+    return vals.length <= 1 ? (vals[0] || '') : 'Mixed';
+  }
+  function hasPackageValue(p) { const v = p && p.TrxNoAgainstPackage; return v != null && String(v).trim() !== '' && String(v).trim() !== '0'; }
   function chequeKey(p) { return p.ChequeNumber || p.CheckNo || p.ChequeNo || p.TrxNo || ''; }
+  function hasCheckNumberValue(p) { const v = chequeKey(p || {}); return v != null && String(v).trim() !== ''; }
+  function updateGroupingButtons() {
+    document.getElementById('packageGroupToggleBtn').classList.toggle('on', groupByPackage);
+    document.getElementById('checkGroupToggleBtn').classList.toggle('on', groupByCheckNumber);
+  }
+  function getGroupingLabel() {
+    if (groupByPackage && groupByCheckNumber) return 'Grouped by Package + Tax Rate + CheckNumber';
+    if (groupByPackage) return 'Grouped by Package + Tax Rate';
+    if (groupByCheckNumber) return 'Grouped by CheckNumber';
+    return 'Grouped';
+  }
 
   function openAllChequeDetails() {
     const win = window.open('', '_blank');
@@ -1543,23 +1588,41 @@ app.get('/invoice/:billNo', (req, res) => {
   }
 
   function renderUngrouped() {
+    updateGroupingButtons();
     swapTbody(buildUngroupedHtml, () => INV_POSTINGS.length + ' items', false);
   }
 
-  function renderGrouped() {
-    if (!INV_POSTINGS.some(hasPackageRef)) {
-      showToast('No TrxNoAgainstPackage found in this bill. Grouping is not available.');
-      groupingOn = false;
-      document.getElementById('groupToggleBtn').classList.remove('on');
-      return;
+  function renderGroupedPostings() {
+    if (groupByPackage && !INV_POSTINGS.some(hasPackageValue)) {
+      showToast('No TrxNoAgainstPackage found in this bill. Package grouping is not available.');
+      groupByPackage = false;
+      updateGroupingButtons();
     }
-    const pkgMap = new Map();
+    if (groupByCheckNumber && !INV_POSTINGS.some(hasCheckNumberValue)) {
+      showToast('No CheckNumber found in this bill. CheckNumber grouping is not available.');
+      groupByCheckNumber = false;
+      updateGroupingButtons();
+    }
+    if (!groupByPackage && !groupByCheckNumber) { renderUngrouped(); return; }
+
+    const groupMap = new Map();
     const solo = [];
     for (const p of INV_POSTINGS) {
-      if (hasPackageRef(p)) {
-        const key = String(p.TrxNoAgainstPackage).trim() + '||' + (p.HRSTaxRate || '');
-        if (!pkgMap.has(key)) pkgMap.set(key, []);
-        pkgMap.get(key).push(p);
+      const keys = [];
+      let canGroup = true;
+      if (groupByPackage) {
+        if (hasPackageValue(p)) keys.push(String(p.TrxNoAgainstPackage).trim(), String(p.HRSTaxRate || ''));
+        else canGroup = false;
+      }
+      if (groupByCheckNumber) {
+        const chk = chequeKey(p);
+        if (chk) keys.push(String(chk));
+        else canGroup = false;
+      }
+      if (canGroup) {
+        const key = keys.join('||');
+        if (!groupMap.has(key)) groupMap.set(key, []);
+        groupMap.get(key).push(p);
       } else {
         solo.push(p);
       }
@@ -1568,12 +1631,17 @@ app.get('/invoice/:billNo', (req, res) => {
       () => {
         let html = '';
         let rowNo = 1;
-        for (const [, group] of pkgMap) {
-          const byAmt = [...group].sort((a, b) => parseFloat(b.HRSAmount || 0) - parseFloat(a.HRSAmount || 0));
-          const sumAmt = group.reduce((s, p) => s + (parseFloat(p.HRSAmount) || 0), 0);
-          const sumUP = group.reduce((s, p) => { const q = parseFloat(p.Quantity); return s + (q ? parseFloat(p.HRSAmount) / q : 0); }, 0);
-          const chk = chequeKey(byAmt[0]);
-          html += buildRow(rowNo++, chk, group[0].TrxDate, '', INV_PKG_DESC, '', '', group[0].HRSTaxRate, 1, sumUP, sumAmt, true, INV_CHEQUE_MAP[chk] || null);
+        for (const [, group] of groupMap) {
+          const byAmt = [...group].sort((a, b) => num(b.HRSAmount) - num(a.HRSAmount));
+          const main = byAmt[0] || group[0];
+          const sumAmt = sumAmount(group);
+          const groupedQty = 1;
+          const chk = groupByCheckNumber ? chequeKey(main) : sameOrMixed(group, chequeKey);
+          const taxRate = groupByPackage ? main.HRSTaxRate : sameOrMixed(group, 'HRSTaxRate');
+          const desc = groupByPackage ? (INV_PKG_DESC || 'Grouped Package') : 'Grouped CheckNumber';
+          const articleDesc = group.length + ' posting' + (group.length !== 1 ? 's' : '');
+          const chqDet = chk && chk !== 'Mixed' ? (INV_CHEQUE_MAP[chk] || null) : null;
+          html += buildRow(rowNo++, chk, group[0].TrxDate, '', desc, '', articleDesc, taxRate, groupedQty, upr(sumAmt, groupedQty), sumAmt, true, chqDet);
         }
         for (const p of solo) {
           const tcode = p.TrxCode || '';
@@ -1584,18 +1652,20 @@ app.get('/invoice/:billNo', (req, res) => {
         return html || '<tr><td colspan="11" style="text-align:center;padding:32px 0;color:#64748b;font-style:italic;">No postings found.</td></tr>';
       },
       () => {
-        const gc = pkgMap.size, sc = solo.length;
+        const gc = groupMap.size, sc = solo.length;
         return gc + ' group' + (gc !== 1 ? 's' : '') + (sc ? ' + ' + sc + ' item' + (sc !== 1 ? 's' : '') : '');
       },
       true
     );
+    document.getElementById('groupedBadge').textContent = getGroupingLabel();
   }
 
-  function toggleGrouping() {
-    groupingOn = !groupingOn;
-    const btn = document.getElementById('groupToggleBtn');
-    if (groupingOn) { btn.classList.add('on'); renderGrouped(); }
-    else { btn.classList.remove('on'); renderUngrouped(); }
+  function setGroupingMode(mode) {
+    if (mode === 'package') groupByPackage = !groupByPackage;
+    if (mode === 'check') groupByCheckNumber = !groupByCheckNumber;
+    updateGroupingButtons();
+    if (groupByPackage || groupByCheckNumber) renderGroupedPostings();
+    else renderUngrouped();
   }
 
   function showToast(msg) {
@@ -1740,7 +1810,7 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
         .topbar-badge .dot { width:7px; height:7px; border-radius:50%; background:#34d399; box-shadow:0 0 6px #10b981; }
         .topbar-badge .lbl { color:#71717a; font-weight:700; text-transform:uppercase; letter-spacing:.06em; font-size:9px; }
         .topbar-badge .val { color:#34d399; font-weight:700; }
-        .topbar-right { margin-left:auto; display:flex; align-items:center; gap:10px; }
+        .topbar-right { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
         .page { max-width:1280px; margin:0 auto; padding:24px 24px 0; }
         .card { background:#18181b; border:1px solid #27272a; border-radius:12px; padding:20px; margin-bottom:20px; box-shadow:0 10px 28px rgba(0,0,0,0.26); }
         .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:16px 24px; }
@@ -1806,9 +1876,13 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
       <span class="val">${info.BillNo || billNo}</span>
     </div>
     <div class="topbar-right">
-      <button id="groupToggleBtn" class="group-toggle" onclick="toggleGrouping()">
+      <button id="packageGroupToggleBtn" class="group-toggle" onclick="setGroupingMode('package')">
         <div class="toggle-pip"></div>
         <span>Group by Package &amp; Tax Rate</span>
+      </button>
+      <button id="checkGroupToggleBtn" class="group-toggle" onclick="setGroupingMode('check')">
+        <div class="toggle-pip"></div>
+        <span>Group by CheckNumber</span>
       </button>
     </div>
   </div>
@@ -1847,10 +1921,16 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
          <span id="postingCount" class="section-count">${postings.length} items</span>
          <span class="grouped-badge" id="groupedBadge">Grouped</span>
       </div>
-      <button id="inlineGroupToggleBtn" class="group-toggle" onclick="toggleGrouping()">
-         <div class="toggle-pip"></div>
-         <span>Group by Package &amp; Tax Rate</span>
-      </button>
+      <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+        <button id="inlinePackageGroupToggleBtn" class="group-toggle" onclick="setGroupingMode('package')">
+           <div class="toggle-pip"></div>
+           <span>Group by Package &amp; Tax Rate</span>
+        </button>
+        <button id="inlineCheckGroupToggleBtn" class="group-toggle" onclick="setGroupingMode('check')">
+           <div class="toggle-pip"></div>
+           <span>Group by CheckNumber</span>
+        </button>
+      </div>
     </div>
 
     <div class="table-wrap">
@@ -1904,6 +1984,8 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
     const CHEQUE_MAP = ${safeJson(chequeMap)};
     
     let groupingOn = false;
+    let groupByPackage = false;
+    let groupByCheckNumber = false;
 
     // Toast Notification Driver Function
     function showToast(message) {
@@ -2014,19 +2096,9 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
         }, 100);
     }
 
-    // Toggle interaction controller with deep validation assertions
+    // Backward-compatible wrapper for any older inline handler that may still call toggleGrouping.
     function toggleGrouping() {
-        // Assert condition validation: scan if any records contain parent-relation values
-        const validPkgExists = rawPostings.some(p => p.TrxNoAgainstPackage && p.TrxNoAgainstPackage.trim() !== "");
-        
-        if (!validPkgExists) {
-            showToast('No TrxNoAgainstPackage found in this bill. Grouping is not available.');
-            return; // Terminate state shift changes instantly
-        }
-
-        groupingOn = !groupingOn;
-        document.getElementById('groupToggleBtn').classList.toggle('on', groupingOn);
-        renderTable();
+        setGroupingMode('package');
     }
 
     // Master-compatible viewer implementation. These definitions intentionally override
@@ -2049,24 +2121,59 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
         return encodeURIComponent(String(s)).replace(/'/g, '%27');
     }
 
-    function upr(amt, qty) {
-        const q = parseFloat(qty);
-        if (!q) return null;
-        return parseFloat(amt) / q;
+    function num(v) {
+        const n = parseFloat(v);
+        return Number.isNaN(n) ? 0 : n;
     }
 
-    function hasPackageRef(p) {
+    function upr(amt, qty) {
+        const q = num(qty);
+        if (!q) return null;
+        return num(amt) / q;
+    }
+
+    function sumAmount(rows) {
+        return rows.reduce((s, p) => s + num(p.HRSAmount), 0);
+    }
+
+    function sameOrMixed(rows, fieldOrGetter) {
+        const getVal = typeof fieldOrGetter === 'function' ? fieldOrGetter : (p) => p[fieldOrGetter];
+        const vals = [...new Set(rows.map(getVal).filter((v) => v != null && v !== '').map(String))];
+        return vals.length <= 1 ? (vals[0] || '') : 'Mixed';
+    }
+
+    function hasPackageValue(p) {
         const v = p && p.TrxNoAgainstPackage;
         if (v == null) return false;
         const s = String(v).trim();
         return s !== '' && s !== '0';
     }
 
-    function syncToggleButtons(on) {
-        ['groupToggleBtn', 'inlineGroupToggleBtn'].forEach(id => {
+    function chequeKey(p) {
+        return p.ChequeNumber || p.CheckNo || p.ChequeNo || p.TrxNo || '';
+    }
+
+    function hasCheckNumberValue(p) {
+        const v = chequeKey(p || {});
+        return v != null && String(v).trim() !== '';
+    }
+
+    function updateGroupingButtons() {
+        ['packageGroupToggleBtn', 'inlinePackageGroupToggleBtn'].forEach(id => {
             const btn = document.getElementById(id);
-            if (btn) btn.classList.toggle('on', on);
+            if (btn) btn.classList.toggle('on', groupByPackage);
         });
+        ['checkGroupToggleBtn', 'inlineCheckGroupToggleBtn'].forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.classList.toggle('on', groupByCheckNumber);
+        });
+    }
+
+    function getGroupingLabel() {
+        if (groupByPackage && groupByCheckNumber) return 'Grouped by Package + Tax Rate + CheckNumber';
+        if (groupByPackage) return 'Grouped by Package + Tax Rate';
+        if (groupByCheckNumber) return 'Grouped by CheckNumber';
+        return 'Grouped';
     }
 
     function base64ToText(b64) {
@@ -2229,7 +2336,7 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
         return rawPostings.map((p, i) => {
             const tcode = p.TrxCode || '';
             const artId = p.ArticleID ?? p.ArticleId ?? p.ArticleCode ?? '';
-            const chq = p.ChequeNumber || p.CheckNo || p.ChequeNo || p.TrxNo || '';
+            const chq = chequeKey(p);
             const chqDet = chequeDetailsFor(chq);
             return buildRow(i + 1, chq, p.TrxDate, tcode,
                 INV_TRX_DESC[tcode] || '', artId,
@@ -2239,8 +2346,7 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
     }
 
     function renderUngrouped() {
-        groupingOn = false;
-        syncToggleButtons(false);
+        updateGroupingButtons();
         swapTbody(
             buildUngroupedHtml,
             () => rawPostings.length + ' items',
@@ -2248,22 +2354,37 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
         );
     }
 
-    function renderGrouped() {
-        const hasPackage = rawPostings.some(hasPackageRef);
-        if (!hasPackage) {
-            showToast('No TrxNoAgainstPackage found in this bill. Grouping is not available.');
-            groupingOn = false;
-            syncToggleButtons(false);
-            return;
+    function renderGroupedPostings() {
+        if (groupByPackage && !rawPostings.some(hasPackageValue)) {
+            showToast('No TrxNoAgainstPackage found in this bill. Package grouping is not available.');
+            groupByPackage = false;
+            updateGroupingButtons();
         }
+        if (groupByCheckNumber && !rawPostings.some(hasCheckNumberValue)) {
+            showToast('No CheckNumber found in this bill. CheckNumber grouping is not available.');
+            groupByCheckNumber = false;
+            updateGroupingButtons();
+        }
+        if (!groupByPackage && !groupByCheckNumber) { renderUngrouped(); return; }
 
-        const pkgMap = new Map();
+        const groupMap = new Map();
         const solo = [];
         for (const p of rawPostings) {
-            if (hasPackageRef(p)) {
-                const key = String(p.TrxNoAgainstPackage).trim() + '||' + (p.HRSTaxRate || '');
-                if (!pkgMap.has(key)) pkgMap.set(key, []);
-                pkgMap.get(key).push(p);
+            const keys = [];
+            let canGroup = true;
+            if (groupByPackage) {
+                if (hasPackageValue(p)) keys.push(String(p.TrxNoAgainstPackage).trim(), String(p.HRSTaxRate || ''));
+                else canGroup = false;
+            }
+            if (groupByCheckNumber) {
+                const chk = chequeKey(p);
+                if (chk) keys.push(String(chk));
+                else canGroup = false;
+            }
+            if (canGroup) {
+                const key = keys.join('||');
+                if (!groupMap.has(key)) groupMap.set(key, []);
+                groupMap.get(key).push(p);
             } else {
                 solo.push(p);
             }
@@ -2273,22 +2394,23 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
             () => {
                 let html = '';
                 let rowNo = 1;
-                for (const [, group] of pkgMap) {
-                    const byAmt = [...group].sort((a, b) => parseFloat(b.HRSAmount || 0) - parseFloat(a.HRSAmount || 0));
-                    const sumAmt = group.reduce((s, p) => s + (parseFloat(p.HRSAmount) || 0), 0);
-                    const sumUP = group.reduce((s, p) => {
-                        const q = parseFloat(p.Quantity);
-                        return s + (q ? parseFloat(p.HRSAmount) / q : 0);
-                    }, 0);
-                    const chk = byAmt[0].ChequeNumber || byAmt[0].CheckNo || byAmt[0].ChequeNo || byAmt[0].TrxNo || '';
-                    const pkgChqDet = chequeDetailsFor(chk);
+                for (const [, group] of groupMap) {
+                    const byAmt = [...group].sort((a, b) => num(b.HRSAmount) - num(a.HRSAmount));
+                    const main = byAmt[0] || group[0];
+                    const sumAmt = sumAmount(group);
+                    const groupedQty = 1;
+                    const chk = groupByCheckNumber ? chequeKey(main) : sameOrMixed(group, chequeKey);
+                    const taxRate = groupByPackage ? main.HRSTaxRate : sameOrMixed(group, 'HRSTaxRate');
+                    const desc = groupByPackage ? (INV_PKG_DESC || 'Grouped Package') : 'Grouped CheckNumber';
+                    const articleDesc = group.length + ' posting' + (group.length !== 1 ? 's' : '');
+                    const pkgChqDet = chk && chk !== 'Mixed' ? chequeDetailsFor(chk) : null;
                     html += buildRow(rowNo++, chk, group[0].TrxDate,
-                        '', INV_PKG_DESC, '', '', group[0].HRSTaxRate, 1, sumUP, sumAmt, true, pkgChqDet);
+                        '', desc, '', articleDesc, taxRate, groupedQty, upr(sumAmt, groupedQty), sumAmt, true, pkgChqDet);
                 }
                 for (const p of solo) {
                     const tcode = p.TrxCode || '';
                     const artId = p.ArticleID ?? p.ArticleId ?? p.ArticleCode ?? '';
-                    const chk = p.ChequeNumber || p.CheckNo || p.ChequeNo || p.TrxNo || '';
+                    const chk = chequeKey(p);
                     const soloChqDet = chequeDetailsFor(chk);
                     html += buildRow(rowNo++, chk, p.TrxDate, tcode,
                         INV_TRX_DESC[tcode] || '', artId,
@@ -2298,23 +2420,27 @@ app.get('/invoice-legacy/:billNo', (req, res) => {
                 return html || '<tr><td colspan="11" style="text-align:center;padding:32px 0;color:#52525b;font-style:italic;">No postings found.</td></tr>';
             },
             () => {
-                const gc = pkgMap.size;
+                const gc = groupMap.size;
                 const sc = solo.length;
                 return gc + ' group' + (gc !== 1 ? 's' : '') + (sc ? ' + ' + sc + ' item' + (sc !== 1 ? 's' : '') : '');
             },
             true
         );
+        const badgeEl = document.getElementById('groupedBadge');
+        if (badgeEl) badgeEl.textContent = getGroupingLabel();
     }
 
     function renderTable() {
-        if (groupingOn) renderGrouped();
+        if (groupByPackage || groupByCheckNumber) renderGroupedPostings();
         else renderUngrouped();
     }
 
-    function toggleGrouping() {
-        groupingOn = !groupingOn;
-        syncToggleButtons(groupingOn);
-        if (groupingOn) renderGrouped();
+    function setGroupingMode(mode) {
+        if (mode === 'package') groupByPackage = !groupByPackage;
+        if (mode === 'check') groupByCheckNumber = !groupByCheckNumber;
+        groupingOn = groupByPackage || groupByCheckNumber;
+        updateGroupingButtons();
+        if (groupingOn) renderGroupedPostings();
         else renderUngrouped();
     }
 
